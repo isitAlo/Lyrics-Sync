@@ -63,20 +63,18 @@ def draw_centered(text):
 def get_media_info():
     try:
         players = subprocess.check_output(["playerctl", "-l"], stderr=subprocess.DEVNULL).decode("utf-8").strip().splitlines()
-        if not players: return None, None, 0
-        
-        active_player = players[0]
+        active_player = None
         for p in players:
             status = subprocess.check_output(["playerctl", "-p", p, "status"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
             if status == "Playing":
                 active_player = p
                 break
+        
+        target = ["-p", active_player] if active_player else []
+        artist = subprocess.check_output(["playerctl"] + target + ["metadata", "artist"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        title = subprocess.check_output(["playerctl"] + target + ["metadata", "title"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        pos = float(subprocess.check_output(["playerctl"] + target + ["position"], stderr=subprocess.DEVNULL).decode("utf-8").strip())
 
-        artist = subprocess.check_output(["playerctl", "-p", active_player, "metadata", "artist"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        title = subprocess.check_output(["playerctl", "-p", active_player, "metadata", "title"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        pos = float(subprocess.check_output(["playerctl", "-p", active_player, "position"], stderr=subprocess.DEVNULL).decode("utf-8").strip())
-
-        # Browser metadata cleaning
         title = re.sub(r' - YouTube Music| - Spotify| - Topic', '', title, flags=re.I)
         if not artist and " - " in title:
             parts = title.split(" - ", 1)
@@ -128,7 +126,9 @@ def scan_folder(folder_path):
             if file.lower().endswith(valid_exts):
                 try:
                     tag = TinyTag.get(os.path.join(root, file))
-                    if tag.artist and tag.title: fetch_lyrics(tag.artist, tag.title)
+                    if tag.artist and tag.title: 
+                        print(f"Syncing: {tag.artist} - {tag.title}")
+                        fetch_lyrics(tag.artist, tag.title)
                 except: continue
 
 def run_visualizer():
