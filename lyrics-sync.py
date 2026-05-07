@@ -10,14 +10,10 @@ import sys
 from tinytag import TinyTag
 from fonts import BLOCK_LETTERS
 
-# Ensure SSL certificates are found on various Linux distros
 os.environ['SSL_CERT_FILE'] = certifi.where()
-
-# Use standard Linux cache directory instead of hardcoding home dir
 CACHE_DIR = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache/lyrics-sync"))
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-# --- RENDERING & WRAPPING ---
 def get_str_width(text):
     width = 0
     for char in text.upper():
@@ -61,17 +57,31 @@ def draw_centered(text):
         all_rendered_lines.append("")
     centered = [line.center(cols) for line in all_rendered_lines]
     top_pad = (rows - len(centered)) // 2
-    
-    # ANSI escape code to clear screen without flickering
     sys.stdout.write("\033[H\033[J")
     print("\n" * max(0, top_pad) + "\n".join(centered))
 
-# --- CORE LOGIC ---
 def get_media_info():
     try:
-        artist = subprocess.check_output(["playerctl", "metadata", "artist"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        title = subprocess.check_output(["playerctl", "metadata", "title"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        pos = float(subprocess.check_output(["playerctl", "position"], stderr=subprocess.DEVNULL).decode("utf-8").strip())
+        players_output = subprocess.check_output(["playerctl", "-l"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        if not players_output:
+            return None, None, 0
+
+        players = players_output.splitlines()
+        active_player = players[0]
+
+        for player in players:
+            try:
+                status = subprocess.check_output(["playerctl", "-p", player, "status"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+                if status == "Playing":
+                    active_player = player
+                    break
+            except:
+                continue
+
+        artist = subprocess.check_output(["playerctl", "-p", active_player, "metadata", "artist"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        title = subprocess.check_output(["playerctl", "-p", active_player, "metadata", "title"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        pos = float(subprocess.check_output(["playerctl", "-p", active_player, "position"], stderr=subprocess.DEVNULL).decode("utf-8").strip())
+        
         return artist, title, pos
     except:
         return None, None, 0
@@ -88,7 +98,6 @@ def fetch_lyrics(artist, title):
     if os.path.exists(filepath):
         with open(filepath, 'r') as f:
             content = f.read()
-            # Ignore the placeholder text so it doesn't crash the parser
             if content.strip() and "theres no lyrics here" not in content:
                 return content
             elif "theres no lyrics here" in content:
@@ -107,7 +116,7 @@ def fetch_lyrics(artist, title):
 def fix_lyrics():
     artist, title, _ = get_media_info()
     if not artist or not title:
-        print("Error: No music is currently playing. Play a song first to fix its lyrics.")
+        print("Error: No active player found.")
         sys.exit(1)
 
     filename = get_filename(artist, title)
@@ -116,35 +125,27 @@ def fix_lyrics():
     if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
         with open(filepath, 'w') as f:
             f.write("theres no lyrics here, you can add them by yourself if ou want\n")
-        print(f"Created new lyric file for: {artist} - {title}")
     
-    # Opens nano (or your default terminal editor)
     editor = os.environ.get('EDITOR', 'nano')
     os.system(f"{editor} '{filepath}'")
 
 def scan_folder(folder_path):
+    folder_path = os.path.expanduser(folder_path)
     if not os.path.isdir(folder_path):
-        print(f"Error: Directory '{folder_path}' does not exist.")
+        print(f"Error: {folder_path} is not a directory.")
         sys.exit(1)
 
-    print(f"Scanning folder: {folder_path}\n")
     valid_exts = ('.mp3', '.flac', '.wav', '.m4a', '.ogg')
-    
     for root, _, files in os.walk(folder_path):
         for file in files:
             if file.lower().endswith(valid_exts):
-                file_path = os.path.join(root, file)
                 try:
-                    tag = TinyTag.get(file_path)
+                    tag = TinyTag.get(os.path.join(root, file))
                     if tag.artist and tag.title:
-                        print(f"Searching: {tag.artist} - {tag.title}...", end=" ")
-                        content = fetch_lyrics(tag.artist, tag.title)
-                        if content:
-                            print("Success!")
-                        else:
-                            print("Not Found.")
-                except Exception:
-                    print(f"Could not read metadata for {file}")
+                        print(f"Fetching: {tag.artist} - {tag.title}")
+                        fetch_lyrics(tag.artist, tag.title)
+                except:
+                    continue
 
 def run_visualizer():
     last_song, synced_data, current_line = "", [], ""
@@ -165,7 +166,7 @@ def run_visualizer():
                     if match:
                         synced_data.append((int(match.group(1)) * 60 + float(match.group(2)), match.group(3).strip()))
             synced_data.sort()
-            sys.stdout.write("\033[H\033[J") # Clear screen on song change
+            sys.stdout.write("\033[H\033[J")
 
         if synced_data:
             line_to_show = ""
@@ -178,34 +179,24 @@ def run_visualizer():
         time.sleep(0.05)
 
 def main():
-    parser = argparse.ArgumentParser(description="Lyrics-Sync: Universal Lyrics Visualizer")
-    parser.add_argument("--search", type=str, help="Search and download lyrics for a song (Artist - Title)")
-    parser.add_argument("--fix", action="store_true", help="Open the lyric file for the currently playing song")
-    parser.add_argument("--get", type=str, help="Scan a folder and download lyrics for all audio files")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--search", type=str)
+    parser.add_argument("--fix", action="store_true")
+    parser.add_argument("--get", type=str)
     args = parser.parse_args()
 
     if args.fix:
         fix_lyrics()
-        sys.exit(0)
-
-    if args.get:
+    elif args.get:
         scan_folder(args.get)
-        sys.exit(0)
-
-    if args.search:
+    elif args.search:
         if " - " in args.search:
             a, t = args.search.split(" - ", 1)
-            print(f"Searching for: {t} by {a}...")
-            res = fetch_lyrics(a, t)
-            if res:
-                print(f"Success! Saved to {CACHE_DIR}")
-            else:
-                print("Lyrics not found.")
+            fetch_lyrics(a, t)
         else:
-            print("Usage: --search 'Artist - Title'")
-        sys.exit(0)
-
-    run_visualizer()
+            print("Use: 'Artist - Title'")
+    else:
+        run_visualizer()
 
 if __name__ == "__main__":
     main()
