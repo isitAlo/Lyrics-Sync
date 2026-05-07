@@ -62,25 +62,25 @@ def draw_centered(text):
 
 def get_media_info():
     try:
-        players_output = subprocess.check_output(["playerctl", "-l"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        if not players_output:
-            return None, None, 0
-
-        players = players_output.splitlines()
+        players = subprocess.check_output(["playerctl", "-l"], stderr=subprocess.DEVNULL).decode("utf-8").strip().splitlines()
+        if not players: return None, None, 0
+        
         active_player = players[0]
-
-        for player in players:
-            try:
-                status = subprocess.check_output(["playerctl", "-p", player, "status"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-                if status == "Playing":
-                    active_player = player
-                    break
-            except:
-                continue
+        for p in players:
+            status = subprocess.check_output(["playerctl", "-p", p, "status"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+            if status == "Playing":
+                active_player = p
+                break
 
         artist = subprocess.check_output(["playerctl", "-p", active_player, "metadata", "artist"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
         title = subprocess.check_output(["playerctl", "-p", active_player, "metadata", "title"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
         pos = float(subprocess.check_output(["playerctl", "-p", active_player, "position"], stderr=subprocess.DEVNULL).decode("utf-8").strip())
+
+        # Browser metadata cleaning
+        title = re.sub(r' - YouTube Music| - Spotify| - Topic', '', title, flags=re.I)
+        if not artist and " - " in title:
+            parts = title.split(" - ", 1)
+            artist, title = parts[0], parts[1]
         
         return artist, title, pos
     except:
@@ -92,22 +92,19 @@ def get_filename(artist, title):
     return f"{clean_a}_{clean_t}.lrc".replace(" ", "_").lower()
 
 def fetch_lyrics(artist, title):
+    if not artist or not title: return None
     filename = get_filename(artist, title)
     filepath = os.path.join(CACHE_DIR, filename)
 
     if os.path.exists(filepath):
         with open(filepath, 'r') as f:
             content = f.read()
-            if content.strip() and "theres no lyrics here" not in content:
-                return content
-            elif "theres no lyrics here" in content:
-                return None
+            return content if "theres no lyrics here" not in content else None
 
     try:
         content = syncedlyrics.search(f"{title} {artist}")
         if content:
-            with open(filepath, 'w') as f:
-                f.write(content)
+            with open(filepath, 'w') as f: f.write(content)
             return content
     except:
         pass
@@ -116,45 +113,31 @@ def fetch_lyrics(artist, title):
 def fix_lyrics():
     artist, title, _ = get_media_info()
     if not artist or not title:
-        print("Error: No active player found.")
-        sys.exit(1)
-
+        print("No active song found."); sys.exit(1)
     filename = get_filename(artist, title)
     filepath = os.path.join(CACHE_DIR, filename)
-
-    if not os.path.exists(filepath) or os.path.getsize(filepath) == 0:
-        with open(filepath, 'w') as f:
-            f.write("theres no lyrics here, you can add them by yourself if ou want\n")
-    
-    editor = os.environ.get('EDITOR', 'nano')
-    os.system(f"{editor} '{filepath}'")
+    if not os.path.exists(filepath):
+        with open(filepath, 'w') as f: f.write("theres no lyrics here, you can add them by yourself if ou want\n")
+    os.system(f"{os.environ.get('EDITOR', 'nano')} '{filepath}'")
 
 def scan_folder(folder_path):
     folder_path = os.path.expanduser(folder_path)
-    if not os.path.isdir(folder_path):
-        print(f"Error: {folder_path} is not a directory.")
-        sys.exit(1)
-
     valid_exts = ('.mp3', '.flac', '.wav', '.m4a', '.ogg')
     for root, _, files in os.walk(folder_path):
         for file in files:
             if file.lower().endswith(valid_exts):
                 try:
                     tag = TinyTag.get(os.path.join(root, file))
-                    if tag.artist and tag.title:
-                        print(f"Fetching: {tag.artist} - {tag.title}")
-                        fetch_lyrics(tag.artist, tag.title)
-                except:
-                    continue
+                    if tag.artist and tag.title: fetch_lyrics(tag.artist, tag.title)
+                except: continue
 
 def run_visualizer():
     last_song, synced_data, current_line = "", [], ""
     while True:
         raw_artist, raw_title, pos = get_media_info()
-        if not raw_artist:
-            time.sleep(1)
-            continue
-
+        if not raw_artist or not raw_title:
+            time.sleep(1); continue
+        
         song_id = f"{raw_artist}-{raw_title}"
         if song_id != last_song:
             last_song = song_id
@@ -163,8 +146,7 @@ def run_visualizer():
             if content:
                 for line in content.splitlines():
                     match = re.search(r'\[(\d+):(\d+\.\d+)\](.*)', line)
-                    if match:
-                        synced_data.append((int(match.group(1)) * 60 + float(match.group(2)), match.group(3).strip()))
+                    if match: synced_data.append((int(match.group(1)) * 60 + float(match.group(2)), match.group(3).strip()))
             synced_data.sort()
             sys.stdout.write("\033[H\033[J")
 
@@ -184,19 +166,13 @@ def main():
     parser.add_argument("--fix", action="store_true")
     parser.add_argument("--get", type=str)
     args = parser.parse_args()
-
-    if args.fix:
-        fix_lyrics()
-    elif args.get:
-        scan_folder(args.get)
+    if args.fix: fix_lyrics()
+    elif args.get: scan_folder(args.get)
     elif args.search:
         if " - " in args.search:
             a, t = args.search.split(" - ", 1)
             fetch_lyrics(a, t)
-        else:
-            print("Use: 'Artist - Title'")
-    else:
-        run_visualizer()
+    else: run_visualizer()
 
 if __name__ == "__main__":
     main()
