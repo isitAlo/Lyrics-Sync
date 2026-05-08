@@ -6,6 +6,7 @@ import shutil
 import syncedlyrics
 import certifi
 import sys
+import argparse
 
 os.environ['SSL_CERT_FILE'] = certifi.where()
 CACHE_DIR = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache/lyrics-sync"))
@@ -63,62 +64,62 @@ def get_media_info():
     try:
         data = subprocess.check_output(
             "playerctl metadata --format '{{title}}|||{{artist}}|||{{position}}'",
-            shell=True,
-            executable="/bin/sh",
-            stderr=subprocess.STDOUT
+            shell=True, executable="/bin/sh", stderr=subprocess.STDOUT
         ).decode("utf-8").strip()
-        
         if not data or "No player found" in data: return None, None, 0
-        
         parts = data.split("|||")
         title = parts[0].strip()
         artist = parts[1].strip()
-        
         try:
             raw_pos = float(parts[2])
             pos = raw_pos / 1000000 if raw_pos > 100000 else raw_pos
-        except:
-            pos = 0.0
-
+        except: pos = 0.0
         title = re.sub(r' - YouTube Music| - Spotify| - Topic| - YouTube| - Brave', '', title, flags=re.I)
-        
         if (not artist or artist == "") and " - " in title:
             split_parts = title.split(" - ", 1)
             artist, title = split_parts[0].strip(), split_parts[1].strip()
-            
         return artist, title, pos
-    except:
-        return None, None, 0
+    except: return None, None, 0
 
-def fetch_lyrics(artist, title):
-    if not title: return None
+def get_lrc_path(artist, title):
     clean_a = " ".join(re.findall(r'\w+', re.sub(r'\(.*?\)|\[.*?\]', '', artist))[:2])
     clean_t = " ".join(re.findall(r'\w+', re.sub(r'\(.*?\)|\[.*?\]', '', title))[:2])
     filename = f"{clean_a}_{clean_t}.lrc".replace(" ", "_").lower()
-    filepath = os.path.join(CACHE_DIR, filename)
+    return os.path.join(CACHE_DIR, filename)
 
+def fetch_lyrics(artist, title):
+    if not title: return None
+    filepath = get_lrc_path(artist, title)
     if os.path.exists(filepath):
         with open(filepath, 'r') as f:
             content = f.read()
             return content if "theres no lyrics here" not in content else None
-
     try:
         search_query = f"{title} {artist}" if artist else title
         content = syncedlyrics.search(search_query)
         if content:
             with open(filepath, 'w') as f: f.write(content)
             return content
-    except:
-        pass
+    except: pass
     return None
+
+def fix_lyrics():
+    artist, title, _ = get_media_info()
+    if not title:
+        print("No song detected."); return
+    filepath = get_lrc_path(artist, title)
+    if not os.path.exists(filepath):
+        with open(filepath, 'w') as f:
+            f.write("[00:00.00] Edit these lyrics...")
+    editor = os.environ.get('EDITOR', 'nano')
+    subprocess.call([editor, filepath])
 
 def run_visualizer():
     last_song, synced_data, current_line = "", [], ""
     while True:
         raw_artist, raw_title, pos = get_media_info()
         if not raw_title:
-            time.sleep(1)
-            continue
+            time.sleep(1); continue
         song_id = f"{raw_artist}-{raw_title}"
         if song_id != last_song:
             last_song = song_id
@@ -142,4 +143,8 @@ def run_visualizer():
         time.sleep(0.05)
 
 if __name__ == "__main__":
-    run_visualizer()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--fix", action="store_true")
+    args = parser.parse_args()
+    if args.fix: fix_lyrics()
+    else: run_visualizer()
