@@ -103,14 +103,36 @@ def fetch_lyrics(artist, title):
     except: pass
     return None
 
+def get_all_lyrics(folder_path):
+    from tinytag import TinyTag
+    if not os.path.isdir(folder_path):
+        print(f"Error: {folder_path} is not a valid directory.")
+        return
+    
+    files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav'))]
+    print(f"Found {len(files)} songs. Starting download...")
+    
+    for filename in files:
+        full_path = os.path.join(folder_path, filename)
+        try:
+            tag = TinyTag.get(full_path)
+            artist, title = tag.artist or "", tag.title or ""
+            if not title:
+                title = os.path.splitext(filename)[0]
+            
+            print(f"Checking: {title}...", end="\r")
+            fetch_lyrics(artist, title)
+        except Exception as e:
+            print(f"\nFailed to process {filename}: {e}")
+            
+    print(f"\nFinished! All lyrics are saved in: {CACHE_DIR}")
+
 def fix_lyrics(manual_path=None):
     if manual_path:
+        from tinytag import TinyTag
         try:
-            from tinytag import TinyTag
             tag = TinyTag.get(manual_path)
             artist, title = tag.artist or "", tag.title or ""
-        except ImportError:
-            print("Error: tinytag module not found. Run 'pip install tinytag'"); return
         except Exception as e:
             print(f"Error reading tags: {e}"); return
     else:
@@ -120,19 +142,10 @@ def fix_lyrics(manual_path=None):
         print("Error: No song detected."); return
         
     filepath = get_lrc_path(artist, title)
-    print(f"\n--- Editing Lyrics for: {title} by {artist} ---")
-    print(f"File Location: {filepath}\n")
-    
-    if os.path.exists(filepath):
-        print("Current Content:")
-        with open(filepath, 'r') as f:
-            print(f.read())
-    else:
-        print("No local file found. Creating a new one...")
-        with open(filepath, 'w') as f:
-            f.write("[00:00.00] New lyric file...")
-            
-    input("\nPress Enter to open the editor and make changes...")
+    if not os.path.exists(filepath):
+        print(f"Searching online for {title}...")
+        fetch_lyrics(artist, title)
+
     editor = os.environ.get('EDITOR', 'nano')
     subprocess.call([editor, filepath])
 
@@ -167,8 +180,11 @@ def run_visualizer():
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--fix", nargs='?', const=True)
+    parser.add_argument("--get", type=str)
     args = parser.parse_args()
-    if args.fix:
+    if args.get:
+        get_all_lyrics(args.get)
+    elif args.fix:
         path = args.fix if isinstance(args.fix, str) else None
         fix_lyrics(path)
     else:
