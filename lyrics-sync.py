@@ -62,19 +62,16 @@ def draw_centered(text):
 
 def get_media_info():
     try:
-        # Get list of all players
         players = subprocess.check_output(["playerctl", "-l"], stderr=subprocess.DEVNULL).decode("utf-8").strip().splitlines()
         if not players: return None, None, 0
         
-        # Priority 1: Find a player that is actually "Playing"
         active_player = None
         for p in players:
             status = subprocess.check_output(["playerctl", "-p", p, "status"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
             if status == "Playing":
                 active_player = p
                 break
-        
-        # Priority 2: Use the playerctld daemon if no specific active player found
+                
         if not active_player:
             active_player = "playerctld"
 
@@ -82,7 +79,6 @@ def get_media_info():
         title = subprocess.check_output(["playerctl", "-p", active_player, "metadata", "title"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
         pos = float(subprocess.check_output(["playerctl", "-p", active_player, "position"], stderr=subprocess.DEVNULL).decode("utf-8").strip())
 
-        # Clean browser junk
         title = re.sub(r' - YouTube Music| - Spotify| - Topic| - YouTube', '', title, flags=re.I)
         if not artist and " - " in title:
             parts = title.split(" - ", 1)
