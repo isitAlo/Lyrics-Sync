@@ -103,14 +103,25 @@ def fetch_lyrics(artist, title):
     except: pass
     return None
 
-def fix_lyrics():
-    artist, title, _ = get_media_info()
+def fix_lyrics(manual_path=None):
+    if manual_path:
+        from tinytag import TinyTag
+        try:
+            tag = TinyTag.get(manual_path)
+            artist, title = tag.artist or "", tag.title or ""
+        except:
+            print("Could not read file tags."); return
+    else:
+        artist, title, _ = get_media_info()
+    
     if not title:
         print("No song detected."); return
+        
     filepath = get_lrc_path(artist, title)
     if not os.path.exists(filepath):
         with open(filepath, 'w') as f:
             f.write("[00:00.00] Edit these lyrics...")
+            
     editor = os.environ.get('EDITOR', 'nano')
     subprocess.call([editor, filepath])
 
@@ -144,7 +155,10 @@ def run_visualizer():
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("--fix", action="store_true")
+    parser.add_argument("--fix", nargs='?', const=True)
     args = parser.parse_args()
-    if args.fix: fix_lyrics()
-    else: run_visualizer()
+    if args.fix:
+        path = args.fix if isinstance(args.fix, str) else None
+        fix_lyrics(path)
+    else:
+        run_visualizer()
