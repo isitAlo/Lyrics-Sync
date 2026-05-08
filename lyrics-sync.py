@@ -7,21 +7,9 @@ import syncedlyrics
 import certifi
 import sys
 
-# Force SSL and Cache
 os.environ['SSL_CERT_FILE'] = certifi.where()
 CACHE_DIR = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache/lyrics-sync"))
 os.makedirs(CACHE_DIR, exist_ok=True)
-
-# THE FIX: Ensure Python has the D-Bus address from your environment
-if "DBUS_SESSION_BUS_ADDRESS" not in os.environ:
-    try:
-        # Try to find it if it's missing
-        uid = os.getuid()
-        path = f"/run/user/{uid}/bus"
-        if os.path.exists(path):
-            os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={path}"
-    except:
-        pass
 
 from fonts import BLOCK_LETTERS
 
@@ -73,17 +61,19 @@ def draw_centered(text):
 
 def get_media_info():
     try:
-        # Use shell=True as a last resort to ensure environment variables carry over
-        cmd = "playerctl metadata --format '{{title}}|||{{artist}}|||{{position}}'"
-        data = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        data = subprocess.check_output(
+            "playerctl metadata --format '{{title}}|||{{artist}}|||{{position}}'",
+            shell=True,
+            executable="/bin/sh",
+            stderr=subprocess.STDOUT
+        ).decode("utf-8").strip()
         
-        if not data: return None, None, 0
+        if not data or "No player found" in data: return None, None, 0
         
         parts = data.split("|||")
         title = parts[0].strip()
         artist = parts[1].strip()
         
-        # Position handling
         try:
             raw_pos = float(parts[2])
             pos = raw_pos / 1000000 if raw_pos > 100000 else raw_pos
@@ -124,14 +114,11 @@ def fetch_lyrics(artist, title):
 
 def run_visualizer():
     last_song, synced_data, current_line = "", [], ""
-    
     while True:
         raw_artist, raw_title, pos = get_media_info()
-        
         if not raw_title:
             time.sleep(1)
             continue
-        
         song_id = f"{raw_artist}-{raw_title}"
         if song_id != last_song:
             last_song = song_id
@@ -144,7 +131,6 @@ def run_visualizer():
                         synced_data.append((int(match.group(1)) * 60 + float(match.group(2)), match.group(3).strip()))
             synced_data.sort()
             sys.stdout.write("\033[H\033[J")
-
         if synced_data:
             line_to_show = ""
             for t, lyric_text in synced_data:
