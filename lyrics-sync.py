@@ -6,12 +6,24 @@ import shutil
 import syncedlyrics
 import certifi
 import sys
-from tinytag import TinyTag
-from fonts import BLOCK_LETTERS
 
+# Force SSL and Cache
 os.environ['SSL_CERT_FILE'] = certifi.where()
 CACHE_DIR = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache/lyrics-sync"))
 os.makedirs(CACHE_DIR, exist_ok=True)
+
+# THE FIX: Ensure Python has the D-Bus address from your environment
+if "DBUS_SESSION_BUS_ADDRESS" not in os.environ:
+    try:
+        # Try to find it if it's missing
+        uid = os.getuid()
+        path = f"/run/user/{uid}/bus"
+        if os.path.exists(path):
+            os.environ["DBUS_SESSION_BUS_ADDRESS"] = f"unix:path={path}"
+    except:
+        pass
+
+from fonts import BLOCK_LETTERS
 
 def get_str_width(text):
     width = 0
@@ -61,23 +73,22 @@ def draw_centered(text):
 
 def get_media_info():
     try:
-        cmd = ["playerctl", "metadata", "--format", "{{title}}|||{{artist}}|||{{position}}"]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
-        data = result.stdout.strip()
+        # Use shell=True as a last resort to ensure environment variables carry over
+        cmd = "playerctl metadata --format '{{title}}|||{{artist}}|||{{position}}'"
+        data = subprocess.check_output(cmd, shell=True, stderr=subprocess.DEVNULL).decode("utf-8").strip()
         
         if not data: return None, None, 0
         
         parts = data.split("|||")
-        title = parts[0].strip() if len(parts) > 0 else ""
-        artist = parts[1].strip() if len(parts) > 1 else ""
+        title = parts[0].strip()
+        artist = parts[1].strip()
         
-        pos = 0.0
-        if len(parts) > 2 and parts[2]:
-            try:
-                raw_pos = float(parts[2])
-                pos = raw_pos / 1000000 if raw_pos > 10000 else raw_pos
-            except:
-                pos = 0.0
+        # Position handling
+        try:
+            raw_pos = float(parts[2])
+            pos = raw_pos / 1000000 if raw_pos > 100000 else raw_pos
+        except:
+            pos = 0.0
 
         title = re.sub(r' - YouTube Music| - Spotify| - Topic| - YouTube| - Brave', '', title, flags=re.I)
         
@@ -86,9 +97,7 @@ def get_media_info():
             artist, title = split_parts[0].strip(), split_parts[1].strip()
             
         return artist, title, pos
-    except subprocess.CalledProcessError:
-        return None, None, 0
-    except Exception:
+    except:
         return None, None, 0
 
 def fetch_lyrics(artist, title):
@@ -115,7 +124,6 @@ def fetch_lyrics(artist, title):
 
 def run_visualizer():
     last_song, synced_data, current_line = "", [], ""
-    print("Searching for player...")
     
     while True:
         raw_artist, raw_title, pos = get_media_info()
