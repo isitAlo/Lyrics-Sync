@@ -62,33 +62,30 @@ def draw_centered(text):
 
 def get_media_info():
     try:
-        players = subprocess.check_output(["playerctl", "-l"], stderr=subprocess.DEVNULL).decode("utf-8").strip().splitlines()
-        if not players: return None, None, 0
+        data = subprocess.check_output(
+            ["playerctl", "metadata", "--format", "{{title}}|||{{artist}}|||{{position}}"],
+            stderr=subprocess.DEVNULL
+        ).decode("utf-8").strip()
         
-        active_player = None
-        for p in players:
-            status = subprocess.check_output(["playerctl", "-p", p, "status"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-            if status == "Playing":
-                active_player = p
-                break
+        if not data: return None, None, 0
         
-        target = ["-p", active_player] if active_player else []
-        artist = subprocess.check_output(["playerctl"] + target + ["metadata", "artist"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        title = subprocess.check_output(["playerctl"] + target + ["metadata", "title"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        pos_raw = subprocess.check_output(["playerctl"] + target + ["position"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        pos = float(pos_raw) if pos_raw else 0.0
+        parts = data.split("|||")
+        title = parts[0].strip()
+        artist = parts[1].strip()
+        pos = float(parts[2]) / 1000000 if len(parts[2]) > 7 else float(parts[2])
 
-        title = re.sub(r' - YouTube Music| - Spotify| - Topic| - YouTube', '', title, flags=re.I)
-        if not artist and " - " in title:
-            parts = title.split(" - ", 1)
-            artist, title = parts[0], parts[1]
+        title = re.sub(r' - YouTube Music| - Spotify| - Topic| - YouTube| - Brave', '', title, flags=re.I)
         
+        if (not artist or artist == "") and " - " in title:
+            split_parts = title.split(" - ", 1)
+            artist, title = split_parts[0].strip(), split_parts[1].strip()
+            
         return artist, title, pos
     except:
         return None, None, 0
 
 def fetch_lyrics(artist, title):
-    if not artist or not title: return None
+    if not title: return None
     clean_a = " ".join(re.findall(r'\w+', re.sub(r'\(.*?\)|\[.*?\]', '', artist))[:2])
     clean_t = " ".join(re.findall(r'\w+', re.sub(r'\(.*?\)|\[.*?\]', '', title))[:2])
     filename = f"{clean_a}_{clean_t}.lrc".replace(" ", "_").lower()
@@ -100,7 +97,8 @@ def fetch_lyrics(artist, title):
             return content if "theres no lyrics here" not in content else None
 
     try:
-        content = syncedlyrics.search(f"{title} {artist}")
+        search_query = f"{title} {artist}" if artist else title
+        content = syncedlyrics.search(search_query)
         if content:
             with open(filepath, 'w') as f: f.write(content)
             return content
@@ -112,8 +110,9 @@ def run_visualizer():
     last_song, synced_data, current_line = "", [], ""
     while True:
         raw_artist, raw_title, pos = get_media_info()
-        if not raw_artist or not raw_title:
-            time.sleep(1); continue
+        if not raw_title:
+            time.sleep(1)
+            continue
         
         song_id = f"{raw_artist}-{raw_title}"
         if song_id != last_song:
