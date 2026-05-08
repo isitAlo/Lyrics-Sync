@@ -113,14 +113,11 @@ def fix_lyrics(manual_path=None):
             print("Error: Could not read file tags."); return
     else:
         artist, title, _ = get_media_info()
-    
     if not title:
         print("Error: No song detected."); return
-        
     filepath = get_lrc_path(artist, title)
     print(f"\n--- Editing Lyrics for: {title} by {artist} ---")
     print(f"File Location: {filepath}\n")
-    
     if os.path.exists(filepath):
         print("Current Content:")
         with open(filepath, 'r') as f:
@@ -129,7 +126,6 @@ def fix_lyrics(manual_path=None):
         print("No local file found. Creating a new one...")
         with open(filepath, 'w') as f:
             f.write("[00:00.00] New lyric file...")
-            
     input("\nPress Enter to open the editor and make changes...")
     editor = os.environ.get('EDITOR', 'nano')
     subprocess.call([editor, filepath])
