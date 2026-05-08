@@ -90,10 +90,15 @@ def get_lrc_path(artist, title):
 def fetch_lyrics(artist, title):
     if not title: return None
     filepath = get_lrc_path(artist, title)
+    
+    # Check if we already have it saved first
     if os.path.exists(filepath):
         with open(filepath, 'r') as f:
             content = f.read()
-            return content if "theres no lyrics here" not in content else None
+            if content and "[00:" in content:
+                return content
+    
+    # If not saved, search the internet
     try:
         search_query = f"{title} {artist}" if artist else title
         content = syncedlyrics.search(search_query)
@@ -106,26 +111,29 @@ def fetch_lyrics(artist, title):
 def get_all_lyrics(folder_path):
     from tinytag import TinyTag
     if not os.path.isdir(folder_path):
-        print(f"Error: {folder_path} is not a valid directory.")
+        print(f"Error: {folder_path} is not a directory.")
         return
     
     files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav'))]
-    print(f"Found {len(files)} songs. Starting download...")
+    print(f"Scanning {len(files)} songs...")
     
     for filename in files:
         full_path = os.path.join(folder_path, filename)
         try:
             tag = TinyTag.get(full_path)
             artist, title = tag.artist or "", tag.title or ""
-            if not title:
-                title = os.path.splitext(filename)[0]
+            if not title: title = os.path.splitext(filename)[0]
             
-            print(f"Checking: {title}...", end="\r")
+            lrc_file = get_lrc_path(artist, title)
+            if os.path.exists(lrc_file):
+                print(f"Skipping (Already exists): {title}")
+                continue
+            
+            print(f"Downloading: {title}...")
             fetch_lyrics(artist, title)
         except Exception as e:
-            print(f"\nFailed to process {filename}: {e}")
-            
-    print(f"\nFinished! All lyrics are saved in: {CACHE_DIR}")
+            print(f"Error on {filename}: {e}")
+    print(f"\nDone. Lyrics are in {CACHE_DIR}")
 
 def fix_lyrics(manual_path=None):
     if manual_path:
@@ -133,17 +141,20 @@ def fix_lyrics(manual_path=None):
         try:
             tag = TinyTag.get(manual_path)
             artist, title = tag.artist or "", tag.title or ""
-        except Exception as e:
-            print(f"Error reading tags: {e}"); return
+        except: print("Error reading tags."); return
     else:
         artist, title, _ = get_media_info()
     
     if not title:
-        print("Error: No song detected."); return
+        print("No song detected."); return
         
     filepath = get_lrc_path(artist, title)
-    if not os.path.exists(filepath):
-        print(f"Searching online for {title}...")
+    
+    # Explicit check for "mysong-fix"
+    if os.path.exists(filepath):
+        print(f"Opening saved lyrics for: {title}")
+    else:
+        print(f"No saved lyrics found. Searching internet for: {title}...")
         fetch_lyrics(artist, title)
 
     editor = os.environ.get('EDITOR', 'nano')
