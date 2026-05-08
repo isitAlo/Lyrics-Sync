@@ -5,7 +5,6 @@ import re
 import shutil
 import syncedlyrics
 import certifi
-import argparse
 import sys
 from tinytag import TinyTag
 from fonts import BLOCK_LETTERS
@@ -62,17 +61,23 @@ def draw_centered(text):
 
 def get_media_info():
     try:
-        data = subprocess.check_output(
-            ["playerctl", "metadata", "--format", "{{title}}|||{{artist}}|||{{position}}"],
-            stderr=subprocess.DEVNULL
-        ).decode("utf-8").strip()
+        cmd = ["playerctl", "metadata", "--format", "{{title}}|||{{artist}}|||{{position}}"]
+        result = subprocess.run(cmd, capture_output=True, text=True, check=True)
+        data = result.stdout.strip()
         
         if not data: return None, None, 0
         
         parts = data.split("|||")
-        title = parts[0].strip()
-        artist = parts[1].strip()
-        pos = float(parts[2]) / 1000000 if len(parts[2]) > 7 else float(parts[2])
+        title = parts[0].strip() if len(parts) > 0 else ""
+        artist = parts[1].strip() if len(parts) > 1 else ""
+        
+        pos = 0.0
+        if len(parts) > 2 and parts[2]:
+            try:
+                raw_pos = float(parts[2])
+                pos = raw_pos / 1000000 if raw_pos > 10000 else raw_pos
+            except:
+                pos = 0.0
 
         title = re.sub(r' - YouTube Music| - Spotify| - Topic| - YouTube| - Brave', '', title, flags=re.I)
         
@@ -81,7 +86,9 @@ def get_media_info():
             artist, title = split_parts[0].strip(), split_parts[1].strip()
             
         return artist, title, pos
-    except:
+    except subprocess.CalledProcessError:
+        return None, None, 0
+    except Exception:
         return None, None, 0
 
 def fetch_lyrics(artist, title):
@@ -108,8 +115,11 @@ def fetch_lyrics(artist, title):
 
 def run_visualizer():
     last_song, synced_data, current_line = "", [], ""
+    print("Searching for player...")
+    
     while True:
         raw_artist, raw_title, pos = get_media_info()
+        
         if not raw_title:
             time.sleep(1)
             continue
