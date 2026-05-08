@@ -71,13 +71,12 @@ def get_media_info():
             if status == "Playing":
                 active_player = p
                 break
-                
-        if not active_player:
-            active_player = "playerctld"
-
-        artist = subprocess.check_output(["playerctl", "-p", active_player, "metadata", "artist"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        title = subprocess.check_output(["playerctl", "-p", active_player, "metadata", "title"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
-        pos = float(subprocess.check_output(["playerctl", "-p", active_player, "position"], stderr=subprocess.DEVNULL).decode("utf-8").strip())
+        
+        target = ["-p", active_player] if active_player else []
+        artist = subprocess.check_output(["playerctl"] + target + ["metadata", "artist"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        title = subprocess.check_output(["playerctl"] + target + ["metadata", "title"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        pos_raw = subprocess.check_output(["playerctl"] + target + ["position"], stderr=subprocess.DEVNULL).decode("utf-8").strip()
+        pos = float(pos_raw) if pos_raw else 0.0
 
         title = re.sub(r' - YouTube Music| - Spotify| - Topic| - YouTube', '', title, flags=re.I)
         if not artist and " - " in title:
@@ -88,14 +87,11 @@ def get_media_info():
     except:
         return None, None, 0
 
-def get_filename(artist, title):
-    clean_a = " ".join(re.findall(r'\w+', re.sub(r'\(.*?\)|\[.*?\]', '', artist))[:2])
-    clean_t = " ".join(re.findall(r'\w+', re.sub(r'\(.*?\)|\[.*?\]', '', title))[:2])
-    return f"{clean_a}_{clean_t}.lrc".replace(" ", "_").lower()
-
 def fetch_lyrics(artist, title):
     if not artist or not title: return None
-    filename = get_filename(artist, title)
+    clean_a = " ".join(re.findall(r'\w+', re.sub(r'\(.*?\)|\[.*?\]', '', artist))[:2])
+    clean_t = " ".join(re.findall(r'\w+', re.sub(r'\(.*?\)|\[.*?\]', '', title))[:2])
+    filename = f"{clean_a}_{clean_t}.lrc".replace(" ", "_").lower()
     filepath = os.path.join(CACHE_DIR, filename)
 
     if os.path.exists(filepath):
@@ -112,27 +108,6 @@ def fetch_lyrics(artist, title):
         pass
     return None
 
-def fix_lyrics():
-    artist, title, _ = get_media_info()
-    if not artist or not title:
-        print("No active song found."); sys.exit(1)
-    filename = get_filename(artist, title)
-    filepath = os.path.join(CACHE_DIR, filename)
-    if not os.path.exists(filepath):
-        with open(filepath, 'w') as f: f.write("theres no lyrics here, you can add them by yourself if ou want\n")
-    os.system(f"{os.environ.get('EDITOR', 'nano')} '{filepath}'")
-
-def scan_folder(folder_path):
-    folder_path = os.path.expanduser(folder_path)
-    valid_exts = ('.mp3', '.flac', '.wav', '.m4a', '.ogg')
-    for root, _, files in os.walk(folder_path):
-        for file in files:
-            if file.lower().endswith(valid_exts):
-                try:
-                    tag = TinyTag.get(os.path.join(root, file))
-                    if tag.artist and tag.title: fetch_lyrics(tag.artist, tag.title)
-                except: continue
-
 def run_visualizer():
     last_song, synced_data, current_line = "", [], ""
     while True:
@@ -148,7 +123,8 @@ def run_visualizer():
             if content:
                 for line in content.splitlines():
                     match = re.search(r'\[(\d+):(\d+\.\d+)\](.*)', line)
-                    if match: synced_data.append((int(match.group(1)) * 60 + float(match.group(2)), match.group(3).strip()))
+                    if match:
+                        synced_data.append((int(match.group(1)) * 60 + float(match.group(2)), match.group(3).strip()))
             synced_data.sort()
             sys.stdout.write("\033[H\033[J")
 
@@ -162,19 +138,5 @@ def run_visualizer():
                 draw_centered(current_line)
         time.sleep(0.05)
 
-def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--search", type=str)
-    parser.add_argument("--fix", action="store_true")
-    parser.add_argument("--get", type=str)
-    args = parser.parse_args()
-    if args.fix: fix_lyrics()
-    elif args.get: scan_folder(args.get)
-    elif args.search:
-        if " - " in args.search:
-            a, t = args.search.split(" - ", 1)
-            fetch_lyrics(a, t)
-    else: run_visualizer()
-
 if __name__ == "__main__":
-    main()
+    run_visualizer()
