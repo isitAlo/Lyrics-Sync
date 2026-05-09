@@ -8,11 +8,17 @@ import certifi
 import sys
 import argparse
 
+THEME_COLOR = "\033[1m"
+RESET = "\033[0m"
+
 os.environ['SSL_CERT_FILE'] = certifi.where()
 CACHE_DIR = os.getenv("XDG_CACHE_HOME", os.path.expanduser("~/.cache/lyrics-sync"))
 os.makedirs(CACHE_DIR, exist_ok=True)
 
-from fonts import BLOCK_LETTERS
+try:
+    from fonts import BLOCK_LETTERS
+except ImportError:
+    sys.exit(1)
 
 def get_str_width(text):
     width = 0
@@ -45,7 +51,7 @@ def render_block_segment(text):
     for char in text:
         char_lines = BLOCK_LETTERS.get(char, BLOCK_LETTERS[' '])
         for i in range(height):
-            lines[i] += char_lines[i] + ' '
+            lines[i] += THEME_COLOR + char_lines[i] + RESET + ' '
     return lines
 
 def draw_centered(text):
@@ -55,7 +61,16 @@ def draw_centered(text):
     for segment in wrapped_segments:
         all_rendered_lines.extend(render_block_segment(segment))
         all_rendered_lines.append("")
-    centered = [line.center(cols) for line in all_rendered_lines]
+    
+    color_len = len(THEME_COLOR + RESET)
+    centered = []
+    for line in all_rendered_lines:
+        if not line.strip():
+            centered.append(line.center(cols))
+            continue
+        count = line.count(THEME_COLOR)
+        centered.append(line.center(cols + (color_len * count)))
+        
     top_pad = (rows - len(centered)) // 2
     sys.stdout.write("\033[H\033[J")
     print("\n" * max(0, top_pad) + "\n".join(centered))
@@ -90,15 +105,11 @@ def get_lrc_path(artist, title):
 def fetch_lyrics(artist, title):
     if not title: return None
     filepath = get_lrc_path(artist, title)
-    
-    # Check if we already have it saved first
     if os.path.exists(filepath):
         with open(filepath, 'r') as f:
             content = f.read()
             if content and "[00:" in content:
                 return content
-    
-    # If not saved, search the internet
     try:
         search_query = f"{title} {artist}" if artist else title
         content = syncedlyrics.search(search_query)
@@ -111,29 +122,17 @@ def fetch_lyrics(artist, title):
 def get_all_lyrics(folder_path):
     from tinytag import TinyTag
     if not os.path.isdir(folder_path):
-        print(f"Error: {folder_path} is not a directory.")
         return
-    
     files = [f for f in os.listdir(folder_path) if f.lower().endswith(('.mp3', '.m4a', '.flac', '.wav'))]
-    print(f"Scanning {len(files)} songs...")
-    
     for filename in files:
         full_path = os.path.join(folder_path, filename)
         try:
             tag = TinyTag.get(full_path)
             artist, title = tag.artist or "", tag.title or ""
             if not title: title = os.path.splitext(filename)[0]
-            
-            lrc_file = get_lrc_path(artist, title)
-            if os.path.exists(lrc_file):
-                print(f"Skipping (Already exists): {title}")
-                continue
-            
-            print(f"Downloading: {title}...")
+            if os.path.exists(get_lrc_path(artist, title)): continue
             fetch_lyrics(artist, title)
-        except Exception as e:
-            print(f"Error on {filename}: {e}")
-    print(f"\nDone. Lyrics are in {CACHE_DIR}")
+        except: continue
 
 def fix_lyrics(manual_path=None):
     if manual_path:
@@ -141,22 +140,12 @@ def fix_lyrics(manual_path=None):
         try:
             tag = TinyTag.get(manual_path)
             artist, title = tag.artist or "", tag.title or ""
-        except: print("Error reading tags."); return
+        except: return
     else:
         artist, title, _ = get_media_info()
-    
-    if not title:
-        print("No song detected."); return
-        
+    if not title: return
     filepath = get_lrc_path(artist, title)
-    
-    # Explicit check for "mysong-fix"
-    if os.path.exists(filepath):
-        print(f"Opening saved lyrics for: {title}")
-    else:
-        print(f"No saved lyrics found. Searching internet for: {title}...")
-        fetch_lyrics(artist, title)
-
+    if not os.path.exists(filepath): fetch_lyrics(artist, title)
     editor = os.environ.get('EDITOR', 'nano')
     subprocess.call([editor, filepath])
 
@@ -193,10 +182,6 @@ if __name__ == "__main__":
     parser.add_argument("--fix", nargs='?', const=True)
     parser.add_argument("--get", type=str)
     args = parser.parse_args()
-    if args.get:
-        get_all_lyrics(args.get)
-    elif args.fix:
-        path = args.fix if isinstance(args.fix, str) else None
-        fix_lyrics(path)
-    else:
-        run_visualizer()
+    if args.get: get_all_lyrics(args.get)
+    elif args.fix: fix_lyrics(args.fix if isinstance(args.fix, str) else None)
+    else: run_visualizer()
